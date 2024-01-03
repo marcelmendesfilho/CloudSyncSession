@@ -28,6 +28,15 @@ struct WorkMiddleware: Middleware {
 
     private func doWork(_ work: SyncWork) {
         switch work {
+        case let .fetchRecords(operation):
+            session.operationHandler.handle(fetchRecordsOperation: operation) { result in
+                switch result {
+                case let .success(response):
+                    session.dispatch(event: .workSuccess(work, .fetchRecords(response)))
+                case let .failure(error):
+                    session.dispatch(event: .workFailure(work, error))
+                }
+            }
         case let .fetch(operation):
             session.operationHandler.handle(fetchOperation: operation) { result in
                 switch result {

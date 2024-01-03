@@ -15,6 +15,9 @@ public struct SyncState {
 
     /// The queue of fetch requests to be handled.
     internal var fetchQueue = [FetchOperation]()
+    
+    /// The queue of fetch records requests to be handled.
+    internal var fetchRecordsQueue = [FetchRecordsOperation]()
 
     /// The queue of create zone requests to be handled.
     internal var createZoneQueue = [CreateZoneOperation]()
@@ -179,6 +182,8 @@ public struct SyncState {
             createZoneQueue.append(operation)
         case let .createSubscription(operation):
             createSubscriptionQueue.append(operation)
+        case let .fetchRecords(operation):
+            fetchRecordsQueue.append(operation)
         }
     }
 
@@ -193,6 +198,8 @@ public struct SyncState {
             createZoneQueue = [operation] + createZoneQueue
         case let .createSubscription(operation):
             createSubscriptionQueue = [operation] + createSubscriptionQueue
+        case let .fetchRecords(operation):
+            fetchRecordsQueue = [operation] + fetchRecordsQueue
         }
     }
 
@@ -207,6 +214,8 @@ public struct SyncState {
             createZoneQueue = createZoneQueue.filter { $0.id != operation.id }
         case let .createSubscription(operation):
             createSubscriptionQueue = createSubscriptionQueue.filter { $0.id != operation.id }
+        case let .fetchRecords(operation):
+            fetchRecordsQueue = fetchRecordsQueue.filter { $0.id != operation.id }
         }
     }
 

@@ -102,6 +102,11 @@ public class CloudSyncSession {
 
         dispatch(event: .doWork(.fetch(operation)))
     }
+    
+    /// Queue a fetch records operation
+    public func fetchRecords(_ operation: FetchRecordsOperation) {
+        dispatch(event: .doWork(.fetchRecords(operation)))
+    }
 
     /// Queue a modify operation.
     public func modify(_ operation: ModifyOperation) {

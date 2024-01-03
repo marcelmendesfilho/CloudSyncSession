@@ -126,6 +126,59 @@ public class CloudKitOperationHandler: OperationHandler {
 
         queueOperation(operation)
     }
+    
+    public func handle(fetchRecordsOperation: FetchRecordsOperation, completion: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {
+        var hasMore = false
+        var recordIDs: [CKRecord.ID] = fetchRecordsOperation.recordIDs
+        var recordsFetched: [CKRecord] = []
+
+        let operation = CKFetchRecordsOperation(recordIDs: recordIDs)
+        
+        operation.perRecordResultBlock = { [weak self] recordId, result in
+            guard let self = self else {
+                return
+            }
+
+            switch result {
+            case .success(let record):
+                recordsFetched.append(record)
+            case .failure(let error):
+                break
+            }
+        }
+        
+        operation.fetchRecordsResultBlock = { [weak self] result in
+            guard let self = self else {
+                return
+            }
+
+            switch result {
+            case .success:
+                completion(
+                    .success(
+                        FetchRecordsOperation.Response(
+                            retrievedRecords: recordsFetched,
+                            hasMore: hasMore
+                        )
+                    )
+                )
+            case .failure(let error):
+                os_log(
+                    "Failed to fetch records: %{public}@",
+                    log: self.log,
+                    type: .error,
+                    String(describing: error)
+                )
+
+                completion(.failure(error))
+            }
+        }
+        
+        operation.qualityOfService = qos
+        operation.database = database
+
+        queueOperation(operation)
+    }
 
     public func handle(fetchOperation: FetchOperation, completion: @escaping (Result<FetchOperation.Response, Error>) -> Void) {
         var hasMore = false

@@ -6,12 +6,14 @@ public enum SyncWork: Identifiable {
     public enum Result {
         case modify(ModifyOperation.Response)
         case fetch(FetchOperation.Response)
+        case fetchRecords(FetchRecordsOperation.Response)
         case createZone(Bool)
         case createSubscription(Bool)
     }
 
     case modify(ModifyOperation)
     case fetch(FetchOperation)
+    case fetchRecords(FetchRecordsOperation)
     case createZone(CreateZoneOperation)
     case createSubscription(CreateSubscriptionOperation)
 
@@ -25,6 +27,8 @@ public enum SyncWork: Identifiable {
             return operation.id
         case let .createSubscription(operation):
             return operation.id
+        case let .fetchRecords(operation):
+            return operation.id
         }
     }
 
@@ -37,6 +41,8 @@ public enum SyncWork: Identifiable {
         case let .createZone(operation):
             return operation.retryCount
         case let .createSubscription(operation):
+            return operation.retryCount
+        case let .fetchRecords(operation):
             return operation.retryCount
         }
     }
@@ -59,6 +65,10 @@ public enum SyncWork: Identifiable {
             operation.retryCount += 1
 
             return .createSubscription(operation)
+        case var .fetchRecords(operation):
+            operation.retryCount += 1
+
+            return .fetchRecords(operation)
         }
     }
 
@@ -81,12 +91,35 @@ public enum SyncWork: Identifiable {
             return "Create zone"
         case .createSubscription:
             return "Create subscription"
+        case .fetchRecords:
+            return "Fetch records"
         }
     }
 }
 
 protocol SyncOperation {
     var retryCount: Int { get set }
+}
+
+public struct FetchRecordsOperation: Identifiable, SyncOperation {
+    public struct Response {
+        public let retrievedRecords: [CKRecord]
+        public let hasMore: Bool
+
+        public init(retrievedRecords: [CKRecord], hasMore: Bool) {
+            self.retrievedRecords = retrievedRecords
+            self.hasMore = hasMore
+        }
+    }
+
+    public let id = UUID()
+
+    public internal(set) var recordIDs: [CKRecord.ID] = []
+    public internal(set) var retryCount: Int = 0
+
+    public init(recordIDs: [CKRecord.ID]) {
+        self.recordIDs = recordIDs
+    }
 }
 
 public struct FetchOperation: Identifiable, SyncOperation {
