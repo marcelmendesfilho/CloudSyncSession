@@ -127,6 +127,56 @@ public class CloudKitOperationHandler: OperationHandler {
         queueOperation(operation)
     }
     
+    public func handle(fetchShareParticipants: FetchShareParticipantsOperation, completion: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void) {
+        var hasMore = false
+        let operation = CKFetchShareParticipantsOperation()
+        var participants: [CKShare.Participant] = []
+                
+        operation.perShareParticipantResultBlock = { [weak self] lookupInfo, result in
+            guard let self = self else {
+                return
+            }
+            
+            switch result {
+            case let .success(participant):
+                participants.append(participant)
+            case let .failure(error):
+                break
+            }
+        }
+        
+        operation.fetchShareParticipantsResultBlock = { [weak self] result in
+            guard let self = self else {
+                return
+            }
+            
+            switch result {
+            case let .success:
+                completion(
+                    .success(
+                        FetchShareParticipantsOperation.Response(
+                            participants: participants,
+                            hasMore: hasMore
+                        )
+                    )
+                )
+            case let .failure(error):
+                os_log(
+                    "Failed to fetch participants: %{public}@",
+                    log: self.log,
+                    type: .error,
+                    String(describing: error)
+                )
+
+                completion(.failure(error))
+            }
+        }
+        
+        operation.qualityOfService = qos
+
+        queueOperation(operation)
+    }
+    
     public func handle(fetchRecordsOperation: FetchRecordsOperation, completion: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {
         var hasMore = false
         var recordIDs: [CKRecord.ID] = fetchRecordsOperation.recordIDs

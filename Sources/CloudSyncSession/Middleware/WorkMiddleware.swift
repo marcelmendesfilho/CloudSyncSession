@@ -37,6 +37,15 @@ struct WorkMiddleware: Middleware {
                     session.dispatch(event: .workFailure(work, error))
                 }
             }
+        case let .fetchShareParticipants(operation):
+            session.operationHandler.handle(fetchShareParticipants: operation) { result in
+                switch result {
+                case let .success(response):
+                    session.dispatch(event: .workSuccess(work, .fetchShareParticipants(response)))
+                case let .failure(error):
+                    session.dispatch(event: .workFailure(work, error))
+                }
+            }
         case let .fetch(operation):
             session.operationHandler.handle(fetchOperation: operation) { result in
                 switch result {

@@ -6,6 +6,8 @@ public struct SyncState {
     public enum OperationMode {
         case modify
         case fetch
+        case fetchRecords
+        case fetchShareParticipants
         case createZone
         case createSubscription
     }
@@ -18,6 +20,9 @@ public struct SyncState {
     
     /// The queue of fetch records requests to be handled.
     internal var fetchRecordsQueue = [FetchRecordsOperation]()
+
+    /// The queue of fetch records requests to be handled.
+    internal var fetchShareParticipantsQueue = [FetchShareParticipantsOperation]()
 
     /// The queue of create zone requests to be handled.
     internal var createZoneQueue = [CreateZoneOperation]()
@@ -87,7 +92,7 @@ public struct SyncState {
         allowedModes.formUnion([.createZone, .createSubscription])
 
         if hasCreatedZone ?? false, hasCreatedSubscription ?? false {
-            allowedModes.formUnion([.fetch, .modify])
+            allowedModes.formUnion([.fetch, .modify, .fetchRecords, .fetchShareParticipants])
         }
 
         return allowedModes
@@ -95,7 +100,7 @@ public struct SyncState {
 
     /// An ordered list of the the kind of work that is allowed at this time.
     internal var preferredOperationModes: [OperationMode?] {
-        [.createZone, .createSubscription, .modify, .fetch, nil]
+        [.createZone, .createSubscription, .modify, .fetch, .fetchRecords, .fetchShareParticipants, nil]
             .filter { allowedOperationModes.contains($0) }
             .filter { mode in
                 switch mode {
@@ -107,6 +112,10 @@ public struct SyncState {
                     return !modifyQueue.isEmpty
                 case .createSubscription:
                     return !createSubscriptionQueue.isEmpty
+                case .fetchRecords:
+                    return !fetchRecordsQueue.isEmpty
+                case .fetchShareParticipants:
+                    return !fetchShareParticipantsQueue.isEmpty
                 case nil:
                     return true
                 }
@@ -155,6 +164,14 @@ public struct SyncState {
             if let operation = createSubscriptionQueue.first {
                 return SyncWork.createSubscription(operation)
             }
+        case .fetchRecords:
+            if let operation = fetchRecordsQueue.first {
+                return SyncWork.fetchRecords(operation)
+            }
+        case .fetchShareParticipants:
+            if let operation = fetchShareParticipantsQueue.first {
+                return SyncWork.fetchShareParticipants(operation)
+            }
         }
 
         return nil
@@ -184,6 +201,8 @@ public struct SyncState {
             createSubscriptionQueue.append(operation)
         case let .fetchRecords(operation):
             fetchRecordsQueue.append(operation)
+        case let .fetchShareParticipants(operation):
+            fetchShareParticipantsQueue.append(operation)
         }
     }
 
@@ -200,6 +219,8 @@ public struct SyncState {
             createSubscriptionQueue = [operation] + createSubscriptionQueue
         case let .fetchRecords(operation):
             fetchRecordsQueue = [operation] + fetchRecordsQueue
+        case let .fetchShareParticipants(operation):
+            fetchShareParticipantsQueue = [operation] + fetchShareParticipantsQueue
         }
     }
 
@@ -216,6 +237,8 @@ public struct SyncState {
             createSubscriptionQueue = createSubscriptionQueue.filter { $0.id != operation.id }
         case let .fetchRecords(operation):
             fetchRecordsQueue = fetchRecordsQueue.filter { $0.id != operation.id }
+        case let .fetchShareParticipants(operation):
+            fetchShareParticipantsQueue = fetchShareParticipantsQueue.filter { $0.id != operation.id }
         }
     }
 

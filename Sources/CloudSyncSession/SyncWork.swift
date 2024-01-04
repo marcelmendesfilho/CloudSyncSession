@@ -7,6 +7,7 @@ public enum SyncWork: Identifiable {
         case modify(ModifyOperation.Response)
         case fetch(FetchOperation.Response)
         case fetchRecords(FetchRecordsOperation.Response)
+        case fetchShareParticipants(FetchShareParticipantsOperation.Response)
         case createZone(Bool)
         case createSubscription(Bool)
     }
@@ -14,6 +15,7 @@ public enum SyncWork: Identifiable {
     case modify(ModifyOperation)
     case fetch(FetchOperation)
     case fetchRecords(FetchRecordsOperation)
+    case fetchShareParticipants(FetchShareParticipantsOperation)
     case createZone(CreateZoneOperation)
     case createSubscription(CreateSubscriptionOperation)
 
@@ -29,6 +31,8 @@ public enum SyncWork: Identifiable {
             return operation.id
         case let .fetchRecords(operation):
             return operation.id
+        case let .fetchShareParticipants(operation):
+            return operation.id
         }
     }
 
@@ -43,6 +47,8 @@ public enum SyncWork: Identifiable {
         case let .createSubscription(operation):
             return operation.retryCount
         case let .fetchRecords(operation):
+            return operation.retryCount
+        case let .fetchShareParticipants(operation):
             return operation.retryCount
         }
     }
@@ -69,6 +75,11 @@ public enum SyncWork: Identifiable {
             operation.retryCount += 1
 
             return .fetchRecords(operation)
+            
+        case var .fetchShareParticipants(operation):
+            operation.retryCount += 1
+            
+            return .fetchShareParticipants(operation)
         }
     }
 
@@ -93,6 +104,8 @@ public enum SyncWork: Identifiable {
             return "Create subscription"
         case .fetchRecords:
             return "Fetch records"
+        case .fetchShareParticipants:
+            return "Fetch share participants"
         }
     }
 }
@@ -120,6 +133,22 @@ public struct FetchRecordsOperation: Identifiable, SyncOperation {
     public init(recordIDs: [CKRecord.ID]) {
         self.recordIDs = recordIDs
     }
+}
+
+public struct FetchShareParticipantsOperation: Identifiable, SyncOperation {
+    public struct Response {
+        public let participants: [CKShare.Participant]
+        public let hasMore: Bool
+
+        public init(participants: [CKShare.Participant], hasMore: Bool) {
+            self.participants = participants
+            self.hasMore = hasMore
+        }
+    }
+
+    public let id = UUID()
+    public internal(set) var retryCount: Int = 0
+    public init() {}
 }
 
 public struct FetchOperation: Identifiable, SyncOperation {
