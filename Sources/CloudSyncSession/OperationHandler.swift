@@ -5,4 +5,5 @@ public protocol OperationHandler {
     func handle(createZoneOperation: CreateZoneOperation, completion: @escaping (Result<Bool, Error>) -> Void)
     func handle(createSubscriptionOperation: CreateSubscriptionOperation, completion: @escaping (Result<Bool, Error>) -> Void)
     func handle(fetchShareParticipants: FetchShareParticipantsOperation, completion: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void)
+    func leaveSharing(completion: @escaping (Result<Bool, Error>) -> Void)
 }
