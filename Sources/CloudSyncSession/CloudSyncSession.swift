@@ -95,8 +95,8 @@ public class CloudSyncSession {
     }
     
     /// Leave sharing
-    public func leaveSharing(shareRecord: CKShare, completion: @escaping (Result<Bool, Error>) -> Void) {
-        operationHandler.leaveSharing(shareRecord: shareRecord, completion: completion)
+    public func leaveSharing(completion: @escaping (Result<Bool, Error>) -> Void) {
+        operationHandler.leaveSharing(completion: completion)
     }
 
     /// Queue a fetch operation.
