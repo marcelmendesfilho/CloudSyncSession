@@ -26,12 +26,37 @@ import Foundation
 import os.log
 
 struct ErrorMiddleware: Middleware {
+    typealias CloneRecordValue = (CKRecordValueProtocol?) -> RecordValueCloneResult
+
     var session: CloudSyncSession
+    var cloneRecordValue: CloneRecordValue
 
     private let log = OSLog(
         subsystem: "com.ryanashcraft.CloudSyncSession",
         category: "Error Middleware"
     )
+
+    init(
+        session: CloudSyncSession,
+        cloneRecordValue: @escaping CloneRecordValue = ErrorMiddleware.defaultCloneRecordValue
+    ) {
+        self.session = session
+        self.cloneRecordValue = cloneRecordValue
+    }
+
+    static func defaultCloneRecordValue(_ value: CKRecordValueProtocol?) -> RecordValueCloneResult {
+        guard let asset = value as? CKAsset else {
+            return .value(value)
+        }
+
+        guard let fileURL = asset.fileURL else {
+            // CKAsset can arrive without a file URL in conflict scenarios.
+            // We can't safely duplicate it across records, so call sites should abort.
+            return .unavailableAsset
+        }
+
+        return .value(CKAsset(fileURL: fileURL))
+    }
 
     func run(next: (SyncEvent) -> SyncEvent, event: SyncEvent) -> SyncEvent {
         switch event {
@@ -227,12 +252,17 @@ struct ErrorMiddleware: Middleware {
 
                 return .resolveConflict(work, [resolvedConflictToSave], [])
             case .limitExceeded:
-                return .split(work, error)
+                if case let .modify(operation) = work, operation.canSplitInHalf {
+                    return .split(work, error)
+                }
+
+                return .halt(error)
             case .zoneNotFound, .userDeletedZone:
                 return .doWork(.createZone(CreateZoneOperation(zoneID: zoneID)))
             case .assetNotAvailable,
                  .assetFileNotFound,
                  .assetFileModified,
+                 .participantAlreadyInvited,
                  .participantMayNeedVerification,
                  .alreadyShared,
                  .tooManyParticipants,
@@ -315,7 +345,15 @@ struct ErrorMiddleware: Middleware {
             // we don't want those to carry over into the final resolved copy
             serverRecord.removeAllFields()
 
-            serverRecord.copyFields(from: resolvedRecord)
+            guard serverRecord.copyFields(from: resolvedRecord, cloneRecordValue: cloneRecordValue) else {
+                os_log(
+                    "Failed to copy all fields from resolved conflict record",
+                    log: log,
+                    type: .error
+                )
+
+                return nil
+            }
         }
 
         return serverRecord
@@ -328,6 +366,11 @@ struct ErrorMiddleware: Middleware {
 
         return resolveExpiredChangeToken()
     }
+}
+
+enum RecordValueCloneResult {
+    case value(CKRecordValueProtocol?)
+    case unavailableAsset
 }
 
 internal extension CKRecord {
@@ -343,15 +386,44 @@ internal extension CKRecord {
         }
     }
 
-    func copyFields(from otherRecord: CKRecord) {
+    func copyFields(
+        from otherRecord: CKRecord,
+        cloneRecordValue: (CKRecordValueProtocol?) -> RecordValueCloneResult = ErrorMiddleware.defaultCloneRecordValue
+    ) -> Bool {
         let encryptedKeys = Set(otherRecord.encryptedValues.allKeys())
+        var encryptedValuesToCopy = [String: CKRecordValueProtocol?]()
+        var valuesToCopy = [String: CKRecordValueProtocol?]()
 
         otherRecord.allKeys().forEach { key in
             if encryptedKeys.contains(key) {
-                encryptedValues[key] = otherRecord.encryptedValues[key]
+                switch cloneRecordValue(otherRecord.encryptedValues[key]) {
+                case let .value(value):
+                    encryptedValuesToCopy[key] = value
+                case .unavailableAsset:
+                    return
+                }
             } else {
-                self[key] = otherRecord[key]
+                switch cloneRecordValue(otherRecord[key]) {
+                case let .value(value):
+                    valuesToCopy[key] = value
+                case .unavailableAsset:
+                    return
+                }
             }
         }
+
+        if encryptedValuesToCopy.count + valuesToCopy.count != otherRecord.allKeys().count {
+            return false
+        }
+
+        encryptedValuesToCopy.forEach { key, value in
+            encryptedValues[key] = value
+        }
+
+        valuesToCopy.forEach { key, value in
+            self[key] = value
+        }
+
+        return true
     }
 }

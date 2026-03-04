@@ -219,9 +219,10 @@ CloudSyncSession is not intended to be a drop-in solution to integrating CloudKi
 These CloudKit features are not supported:
 
 - Shared records
-- Assets
 - Public databases
 - References/relationships\*
+
+`CKAsset` fields are supported as part of `CKRecord` values. You are responsible for managing the underlying local asset file lifecycle.
 
 Perhaps these features work in some capacity, but they are untested. If you are interested in these features and want to verify that they work, please do so and report back your learnings by filing an issue on GitHub.
 

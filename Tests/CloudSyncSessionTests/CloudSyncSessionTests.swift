@@ -8,6 +8,9 @@ class SuccessfulMockOperationHandler: OperationHandler {
 
     func handle(createZoneOperation _: CreateZoneOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
     func handle(createSubscriptionOperation _: CreateSubscriptionOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
+    func handle(fetchRecordsOperation _: FetchRecordsOperation, completion _: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {}
+    func handle(fetchShareParticipants _: FetchShareParticipantsOperation, completion _: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void) {}
+    func leaveSharing(completion _: @escaping (Result<Bool, Error>) -> Void) {}
 
     func handle(fetchOperation _: FetchOperation, completion: @escaping (Result<FetchOperation.Response, Error>) -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(60)) {
@@ -43,6 +46,9 @@ class FailingMockOperationHandler: OperationHandler {
     func handle(createZoneOperation _: CreateZoneOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
     func handle(createSubscriptionOperation _: CreateSubscriptionOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
     func handle(fetchOperation _: FetchOperation, completion _: @escaping (Result<FetchOperation.Response, Error>) -> Void) {}
+    func handle(fetchRecordsOperation _: FetchRecordsOperation, completion _: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {}
+    func handle(fetchShareParticipants _: FetchShareParticipantsOperation, completion _: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void) {}
+    func leaveSharing(completion _: @escaping (Result<Bool, Error>) -> Void) {}
 
     func handle(modifyOperation _: ModifyOperation, completion: @escaping (Result<ModifyOperation.Response, Error>) -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(60)) {
@@ -63,6 +69,9 @@ class FailOnceMockOperationHandler: OperationHandler {
     func handle(createZoneOperation _: CreateZoneOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
     func handle(createSubscriptionOperation _: CreateSubscriptionOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
     func handle(fetchOperation _: FetchOperation, completion _: @escaping (Result<FetchOperation.Response, Error>) -> Void) {}
+    func handle(fetchRecordsOperation _: FetchRecordsOperation, completion _: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {}
+    func handle(fetchShareParticipants _: FetchShareParticipantsOperation, completion _: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void) {}
+    func leaveSharing(completion _: @escaping (Result<Bool, Error>) -> Void) {}
 
     func handle(modifyOperation: ModifyOperation, completion: @escaping (Result<ModifyOperation.Response, Error>) -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(60)) {
@@ -81,10 +90,31 @@ class PartialFailureMockOperationHandler: OperationHandler {
     func handle(createZoneOperation _: CreateZoneOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
     func handle(fetchOperation _: FetchOperation, completion _: @escaping (Result<FetchOperation.Response, Error>) -> Void) {}
     func handle(createSubscriptionOperation _: CreateSubscriptionOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
+    func handle(fetchRecordsOperation _: FetchRecordsOperation, completion _: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {}
+    func handle(fetchShareParticipants _: FetchShareParticipantsOperation, completion _: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void) {}
+    func leaveSharing(completion _: @escaping (Result<Bool, Error>) -> Void) {}
 
     func handle(modifyOperation _: ModifyOperation, completion: @escaping (Result<ModifyOperation.Response, Error>) -> Void) {
         DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(60)) {
             completion(.failure(CKError(.partialFailure)))
+        }
+    }
+}
+
+class AlwaysFailLimitExceededMockOperationHandler: OperationHandler {
+    private(set) var modifyOperationCount = 0
+
+    func handle(createZoneOperation _: CreateZoneOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
+    func handle(fetchOperation _: FetchOperation, completion _: @escaping (Result<FetchOperation.Response, Error>) -> Void) {}
+    func handle(createSubscriptionOperation _: CreateSubscriptionOperation, completion _: @escaping (Result<Bool, Error>) -> Void) {}
+    func handle(fetchRecordsOperation _: FetchRecordsOperation, completion _: @escaping (Result<FetchRecordsOperation.Response, Error>) -> Void) {}
+    func handle(fetchShareParticipants _: FetchShareParticipantsOperation, completion _: @escaping (Result<FetchShareParticipantsOperation.Response, Error>) -> Void) {}
+    func leaveSharing(completion _: @escaping (Result<Bool, Error>) -> Void) {}
+
+    func handle(modifyOperation _: ModifyOperation, completion: @escaping (Result<ModifyOperation.Response, Error>) -> Void) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(60)) {
+            self.modifyOperationCount += 1
+            completion(.failure(CKError(.limitExceeded)))
         }
     }
 }
@@ -439,6 +469,17 @@ final class CloudSyncSessionTests: XCTestCase {
         wait(for: [expectation], timeout: 1000)
     }
 
+    func testModifyOperationSplitInHalfSplitsMixedSaveAndDeleteWork() {
+        let record = makeTestRecord()
+        let recordIDToDelete = CKRecord.ID(recordName: UUID().uuidString)
+        let operation = ModifyOperation(records: [record], recordIDsToDelete: [recordIDToDelete], checkpointID: nil, userInfo: nil)
+        let splitOperations = operation.splitInHalf
+
+        XCTAssertEqual(splitOperations.count, 2)
+        XCTAssertEqual(splitOperations[0].records.count + splitOperations[0].recordIDsToDelete.count, 1)
+        XCTAssertEqual(splitOperations[1].records.count + splitOperations[1].recordIDsToDelete.count, 1)
+    }
+
     func testLoadsMore() {
         var tasks = Set<AnyCancellable>()
         let expectation = self.expectation(description: "work")
@@ -474,6 +515,37 @@ final class CloudSyncSessionTests: XCTestCase {
         wait(for: [expectation], timeout: 1)
     }
 
+    func testLimitExceededHaltsWhenWorkCannotBeSplit() {
+        var tasks = Set<AnyCancellable>()
+        let expectation = self.expectation(description: "work")
+        let mockOperationHandler = AlwaysFailLimitExceededMockOperationHandler()
+        let session = CloudSyncSession(
+            operationHandler: mockOperationHandler,
+            zoneID: testZoneID,
+            resolveConflict: { _, _ in nil },
+            resolveExpiredChangeToken: { nil }
+        )
+        session.state = SyncState(
+            hasGoodAccountStatus: true,
+            hasCreatedZone: true,
+            hasCreatedSubscription: true
+        )
+
+        session.$state
+            .sink { newState in
+                if newState.isHalted {
+                    expectation.fulfill()
+                }
+            }
+            .store(in: &tasks)
+
+        let operation = ModifyOperation(records: [makeTestRecord()], recordIDsToDelete: [], checkpointID: nil, userInfo: nil)
+        session.modify(operation)
+
+        wait(for: [expectation], timeout: 2)
+        XCTAssertEqual(mockOperationHandler.modifyOperationCount, 1)
+    }
+
     // MARK: - CKRecord Extensions
 
     func testCKRecordRemoveAllFields() {
@@ -494,11 +566,136 @@ final class CloudSyncSessionTests: XCTestCase {
 
         let recordB = makeTestRecord()
         recordB["hello"] = "🌎"
-        recordA.encryptedValues["secrets"] = "💀"
+        recordB.encryptedValues["secrets"] = "💀"
 
-        recordA.copyFields(from: recordB)
+        XCTAssertTrue(recordA.copyFields(from: recordB))
 
         XCTAssertEqual(recordA["hello"] as! String?, "🌎")
         XCTAssertEqual(recordA.encryptedValues["secrets"] as! String?, "💀")
+    }
+
+    func testCKRecordRemoveAllFieldsRemovesAssets() throws {
+        let record = makeTestRecord()
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let tempData = Data("asset-data".utf8)
+        try tempData.write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        record["asset"] = CKAsset(fileURL: tempURL)
+        XCTAssertNotNil(record["asset"] as? CKAsset)
+
+        record.removeAllFields()
+
+        XCTAssertNil(record["asset"] as? CKAsset)
+    }
+
+    func testCKRecordCopyFieldsCopiesAssets() throws {
+        let recordA = makeTestRecord()
+        let recordB = makeTestRecord()
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let tempData = Data("asset-data".utf8)
+        try tempData.write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        recordB["asset"] = CKAsset(fileURL: tempURL)
+
+        XCTAssertTrue(recordA.copyFields(from: recordB))
+
+        XCTAssertEqual((recordA["asset"] as? CKAsset)?.fileURL?.path, tempURL.path)
+    }
+
+    func testAssetFileNotFoundHalts() {
+        let session = CloudSyncSession(
+            operationHandler: SuccessfulMockOperationHandler(),
+            zoneID: testZoneID,
+            resolveConflict: { _, _ in nil },
+            resolveExpiredChangeToken: { nil }
+        )
+        let middleware = ErrorMiddleware(session: session)
+        let work = SyncWork.modify(ModifyOperation(records: [makeTestRecord()], recordIDsToDelete: [], checkpointID: nil, userInfo: nil))
+
+        let event = middleware.mapErrorToEvent(error: CKError(.assetFileNotFound), work: work, zoneID: testZoneID)
+
+        switch event {
+        case .halt:
+            XCTAssertTrue(true)
+        default:
+            XCTFail("Expected halt event for assetFileNotFound")
+        }
+    }
+
+    func testPartialFailureWithAssetErrorHalts() {
+        let session = CloudSyncSession(
+            operationHandler: SuccessfulMockOperationHandler(),
+            zoneID: testZoneID,
+            resolveConflict: { _, _ in nil },
+            resolveExpiredChangeToken: { nil }
+        )
+        let middleware = ErrorMiddleware(session: session)
+        let recordID = CKRecord.ID(recordName: UUID().uuidString)
+        let partialError = CKError(
+            .partialFailure,
+            userInfo: [CKPartialErrorsByItemIDKey: [recordID: CKError(.assetFileModified)]]
+        )
+        let work = SyncWork.modify(ModifyOperation(records: [makeTestRecord()], recordIDsToDelete: [], checkpointID: nil, userInfo: nil))
+
+        let event = middleware.mapErrorToEvent(error: partialError, work: work, zoneID: testZoneID)
+
+        switch event {
+        case .halt:
+            XCTAssertTrue(true)
+        default:
+            XCTFail("Expected halt event for partial failure with asset error")
+        }
+    }
+
+    func testServerRecordChangedHaltsWhenAssetCannotBeCloned() throws {
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let tempData = Data("asset-data".utf8)
+        try tempData.write(to: tempURL)
+        defer { try? FileManager.default.removeItem(at: tempURL) }
+
+        let conflictRecordID = CKRecord.ID(recordName: UUID().uuidString)
+        let clientRecord = CKRecord(recordType: "Test", recordID: conflictRecordID)
+        let serverRecord = CKRecord(recordType: "Test", recordID: conflictRecordID)
+
+        let session = CloudSyncSession(
+            operationHandler: SuccessfulMockOperationHandler(),
+            zoneID: testZoneID,
+            resolveConflict: { _, _ in
+                let resolvedRecord = CKRecord(recordType: "Test", recordID: conflictRecordID)
+                resolvedRecord["asset"] = CKAsset(fileURL: tempURL)
+
+                return resolvedRecord
+            },
+            resolveExpiredChangeToken: { nil }
+        )
+        let middleware = ErrorMiddleware(
+            session: session,
+            cloneRecordValue: { value in
+                if value is CKAsset {
+                    return .unavailableAsset
+                }
+
+                return .value(value)
+            }
+        )
+        let conflictError = CKError(
+            .serverRecordChanged,
+            userInfo: [
+                CKRecordChangedErrorClientRecordKey: clientRecord,
+                CKRecordChangedErrorServerRecordKey: serverRecord,
+            ]
+        )
+        let work = SyncWork.modify(ModifyOperation(records: [clientRecord], recordIDsToDelete: [], checkpointID: nil, userInfo: nil))
+
+        let event = middleware.mapErrorToEvent(error: conflictError, work: work, zoneID: testZoneID)
+
+        switch event {
+        case .halt:
+            XCTAssertTrue(true)
+        default:
+            XCTFail("Expected halt event when asset cannot be cloned during conflict resolution")
+        }
     }
 }

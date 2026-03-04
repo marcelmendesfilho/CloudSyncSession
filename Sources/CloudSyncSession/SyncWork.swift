@@ -215,16 +215,26 @@ public struct ModifyOperation: Identifiable, SyncOperation {
     }
 
     var splitInHalf: [ModifyOperation] {
-        let firstHalfRecords = Array(records[0 ..< records.count / 2])
-        let secondHalfRecords = Array(records[records.count / 2 ..< records.count])
+        let totalWorkCount = records.count + recordIDsToDelete.count
+        let firstHalfCount = totalWorkCount / 2
 
-        let firstHalfRecordIDsToDelete = Array(recordIDsToDelete[0 ..< recordIDsToDelete.count / 2])
-        let secondHalfRecordIDsToDelete = Array(recordIDsToDelete[recordIDsToDelete.count / 2 ..< recordIDsToDelete.count])
+        let firstHalfRecordsCount = min(records.count, firstHalfCount)
+        let firstHalfRecordIDsToDeleteCount = max(0, firstHalfCount - firstHalfRecordsCount)
+
+        let firstHalfRecords = Array(records.prefix(firstHalfRecordsCount))
+        let secondHalfRecords = Array(records.dropFirst(firstHalfRecordsCount))
+
+        let firstHalfRecordIDsToDelete = Array(recordIDsToDelete.prefix(firstHalfRecordIDsToDeleteCount))
+        let secondHalfRecordIDsToDelete = Array(recordIDsToDelete.dropFirst(firstHalfRecordIDsToDeleteCount))
 
         return [
             ModifyOperation(records: firstHalfRecords, recordIDsToDelete: firstHalfRecordIDsToDelete, checkpointID: nil, userInfo: userInfo),
             ModifyOperation(records: secondHalfRecords, recordIDsToDelete: secondHalfRecordIDsToDelete, checkpointID: checkpointID, userInfo: userInfo),
         ]
+    }
+
+    var canSplitInHalf: Bool {
+        records.count + recordIDsToDelete.count > 1
     }
 }
 

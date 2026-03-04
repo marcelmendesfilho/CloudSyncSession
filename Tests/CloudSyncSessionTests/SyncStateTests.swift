@@ -55,7 +55,7 @@ final class SyncStateTests: XCTestCase {
         XCTAssertEqual(state.operationMode, SyncState.OperationMode.modify)
 
         switch state.currentWork {
-        case .fetch, .createZone, .createSubscription, nil:
+        case .fetch, .createZone, .createSubscription, .fetchRecords, .fetchShareParticipants, nil:
             XCTFail()
         case .modify:
             break
@@ -76,7 +76,7 @@ final class SyncStateTests: XCTestCase {
         XCTAssertEqual(state.operationMode, SyncState.OperationMode.fetch)
 
         switch state.currentWork {
-        case .modify, .createZone, .createSubscription, nil:
+        case .modify, .createZone, .createSubscription, .fetchRecords, .fetchShareParticipants, nil:
             XCTFail()
         case .fetch:
             break
@@ -116,7 +116,7 @@ final class SyncStateTests: XCTestCase {
         XCTAssertEqual(state.operationMode, SyncState.OperationMode.fetch)
 
         switch state.currentWork {
-        case .modify, .createZone, .createSubscription, nil:
+        case .modify, .createZone, .createSubscription, .fetchRecords, .fetchShareParticipants, nil:
             XCTFail()
         case .fetch:
             break
