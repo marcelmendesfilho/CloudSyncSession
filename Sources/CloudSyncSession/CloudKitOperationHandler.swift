@@ -29,19 +29,15 @@ public class CloudKitOperationHandler: OperationHandler {
     static let minThrottleDuration: TimeInterval = 2
     static let maxThrottleDuration: TimeInterval = 60 * 10
 
-    let database: CKDatabase
     let zoneID: CKRecordZone.ID
     let subscriptionID: String
     let log: OSLog
     let savePolicy: CKModifyRecordsOperation.RecordSavePolicy = .ifServerRecordUnchanged
     let qos: QualityOfService = .userInitiated
-
-    private let operationQueue: OperationQueue = {
-        let queue = OperationQueue()
-        queue.maxConcurrentOperationCount = 1
-
-        return queue
-    }()
+    private let operationScheduler: CloudKitOperationScheduling
+    private let now: () -> DispatchTime
+    private let configureDatabaseOperation: (CKDatabaseOperation) -> Void
+    private let databaseScope: () -> CKDatabase.Scope
 
     var throttleDuration: TimeInterval {
         didSet {
@@ -68,21 +64,48 @@ public class CloudKitOperationHandler: OperationHandler {
     var lastOperationTime: DispatchTime?
 
     public init(database: CKDatabase, zoneID: CKRecordZone.ID, subscriptionID: String, log: OSLog) {
-        self.database = database
         self.zoneID = zoneID
         self.subscriptionID = subscriptionID
         self.log = log
+        operationScheduler = DefaultCloudKitOperationScheduler()
+        now = DispatchTime.now
+        configureDatabaseOperation = { operation in
+            operation.database = database
+        }
+        databaseScope = {
+            database.databaseScope
+        }
+        throttleDuration = Self.minThrottleDuration
+    }
+
+    init(
+        zoneID: CKRecordZone.ID,
+        subscriptionID: String,
+        log: OSLog,
+        operationScheduler: CloudKitOperationScheduling,
+        now: @escaping () -> DispatchTime,
+        configureDatabaseOperation: @escaping (CKDatabaseOperation) -> Void,
+        databaseScope: @escaping () -> CKDatabase.Scope
+    ) {
+        self.zoneID = zoneID
+        self.subscriptionID = subscriptionID
+        self.log = log
+        self.operationScheduler = operationScheduler
+        self.now = now
+        self.configureDatabaseOperation = configureDatabaseOperation
+        self.databaseScope = databaseScope
         throttleDuration = Self.minThrottleDuration
     }
 
     private func queueOperation(_ operation: Operation) {
-        let deadline: DispatchTime = (lastOperationTime ?? DispatchTime.now()) + throttleDuration
+        let deadline: DispatchTime = (lastOperationTime ?? now()) + throttleDuration
 
-        DispatchQueue.main.asyncAfter(deadline: deadline) {
-            self.operationQueue.addOperation(operation)
-            self.operationQueue.addOperation {
-                self.lastOperationTime = DispatchTime.now()
+        operationScheduler.enqueue(operation: operation, deadline: deadline) { [weak self] in
+            guard let self = self else {
+                return
             }
+
+            self.lastOperationTime = self.now()
         }
     }
 
@@ -122,7 +145,7 @@ public class CloudKitOperationHandler: OperationHandler {
 
         operation.savePolicy = savePolicy
         operation.qualityOfService = qos
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
@@ -225,7 +248,7 @@ public class CloudKitOperationHandler: OperationHandler {
         }
         
         operation.qualityOfService = qos
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
@@ -328,7 +351,7 @@ public class CloudKitOperationHandler: OperationHandler {
         }
 
         operation.qualityOfService = qos
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
@@ -423,7 +446,7 @@ public class CloudKitOperationHandler: OperationHandler {
 
     public func leaveSharing(completion: @escaping (Result<Bool, Error>) -> Void) {
         
-        guard database.databaseScope == .shared else {
+        guard databaseScope() == .shared else {
             let invalidDatabaseError = NSError(domain: "CloudKitOperationHandler:leaveSharing", code: -1, userInfo: [ NSLocalizedDescriptionKey: "Invalid database. Leave sharing requires shared database."])
             return completion(.failure(invalidDatabaseError))
         }
@@ -450,25 +473,39 @@ public class CloudKitOperationHandler: OperationHandler {
         queryOperation.queryResultBlock = { [weak self] result in
             switch result {
             case .success(let cursor):
-                guard let shareRecordID else { return }
+                guard let self = self else {
+                    return
+                }
+
+                if let queryError {
+                    completion(.failure(queryError))
+
+                    return
+                }
+
+                guard let shareRecordID else {
+                    completion(.success(true))
+
+                    return
+                }
                 
                 let deleteOperation = ModifyOperation(records: [], recordIDsToDelete: [shareRecordID], checkpointID: UUID(), userInfo: nil)
 
-                self?.handle(modifyOperation: deleteOperation) { result in
+                self.handle(modifyOperation: deleteOperation) { result in
                     switch result {
                     case .success(_):
-                        return completion(.success(true))
+                        completion(.success(true))
                     case .failure(let error):
-                        return completion(.failure(error))
+                        completion(.failure(error))
                     }
                 }
-                return completion(.success(true))
+                _ = cursor
             case .failure(let error):
-                return completion(.failure(error))
+                completion(.failure(error))
             }
         }
         
-        queryOperation.database = database
+        configureDatabaseOperation(queryOperation)
         queryOperation.qualityOfService = .userInitiated
 
         queueOperation(queryOperation)
@@ -514,7 +551,7 @@ private extension CloudKitOperationHandler {
         }
 
         operation.qualityOfService = .userInitiated
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
@@ -546,7 +583,7 @@ private extension CloudKitOperationHandler {
         }
 
         operation.qualityOfService = .userInitiated
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
@@ -584,14 +621,14 @@ private extension CloudKitOperationHandler {
         }
 
         operation.qualityOfService = .userInitiated
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
 
     func createSubscription(zoneID: CKRecordZone.ID, subscriptionID: String, completion: @escaping (Result<Bool, Error>) -> Void) {
         
-        var subscription: CKSubscription = database.databaseScope == .shared ?
+        var subscription: CKSubscription = databaseScope() == .shared ?
             CKDatabaseSubscription(subscriptionID: subscriptionID) :
             CKRecordZoneSubscription(zoneID: zoneID,subscriptionID: subscriptionID)
 
@@ -625,7 +662,7 @@ private extension CloudKitOperationHandler {
         }
 
         operation.qualityOfService = .userInitiated
-        operation.database = database
+        configureDatabaseOperation(operation)
 
         queueOperation(operation)
     }
